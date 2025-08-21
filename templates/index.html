@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>우유 섭취 체크</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🥛 우유 섭취 체크</h1>
+            
+            <div class="controls">
+                <div class="control-group">
+                    <label for="date-input">날짜:</label>
+                    <input type="date" id="date-input" value="{{ today }}">
+                </div>
+                
+                <div class="control-group">
+                    <label for="gender-filter">필터:</label>
+                    <select id="gender-filter">
+                        <option value="all">전체</option>
+                        <option value="M">남학생</option>
+                        <option value="F">여학생</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <button id="toggle-all" class="btn btn-secondary">모두 체크</button>
+                </div>
+                
+                <div class="control-group">
+                    <button id="save-btn" class="btn btn-primary">CSV 저장</button>
+                    <button id="download-btn" class="btn btn-success">CSV 다운로드</button>
+                </div>
+            </div>
+            
+            <div id="status-message" class="status-message"></div>
+        </header>
+        
+        <main>
+            <div id="students-grid" class="students-grid">
+                <!-- Student cards will be populated here -->
+            </div>
+            
+            <div id="loading" class="loading" style="display: none;">
+                데이터를 불러오는 중...
+            </div>
+        </main>
+    </div>
+    
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
