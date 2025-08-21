@@ -14,6 +14,7 @@
             <div class="instructions-content">
                 <p>담임 교사가 학생들의 우유 섭취 여부를 확인할 수 있습니다.</p>
                 <p>학생들은 키가 작아 직접 손을 뻗기 어려우므로, 교사가 대신 체크해 주세요.</p>
+                <p class="muted">※ 저장 방식: 이 기기의 브라우저 <b>localStorage</b>에 저장됩니다. 기기/브라우저를 바꾸면 데이터가 달라질 수 있어요.</p>
             </div>
         </div>
         
@@ -40,8 +41,10 @@
                     </div>
                     
                     <div class="control-group">
-                        <button id="save-btn" class="btn btn-primary">CSV 저장</button>
-                        <button id="download-btn" class="btn btn-success">CSV 다운로드</button>
+                        <!-- 기존: CSV 저장 / CSV 다운로드  →  변경: CSV 내보내기 / CSV 불러오기 -->
+                        <button id="export-csv" class="btn btn-primary">CSV 내보내기</button>
+                        <button id="import-csv-btn" class="btn btn-success">CSV 불러오기</button>
+                        <input type="file" id="import-csv-input" accept=".csv" style="display:none;">
                     </div>
                 </div>
                 
@@ -61,5 +64,186 @@
     </div>
     
     <script src="{{ url_for('static', filename='app.js') }}"></script>
+
+    <!-- localStorage 기반 내보내기/불러오기 로직 -->
+    <script>
+    // ====== 저장소 키 규칙: 날짜별 분리 ======
+    function storageKeyFor(dateStr) {
+      return `milkData:${dateStr}`; // 예: milkData:2025-08-21
+    }
+
+    function loadFromLocalStorage(dateStr) {
+      try {
+        const raw = localStorage.getItem(storageKeyFor(dateStr));
+        return raw ? JSON.parse(raw) : {};
+      } catch (e) {
+        console.error("loadFromLocalStorage error:", e);
+        return {};
+      }
+    }
+
+    function saveToLocalStorage(dateStr, dataObj) {
+      try {
+        localStorage.setItem(storageKeyFor(dateStr), JSON.stringify(dataObj));
+        // 앱 쪽 리렌더를 원하면 커스텀 이벤트 발생
+        document.dispatchEvent(new CustomEvent('milkDataUpdated', { detail: { date: dateStr } }));
+      } catch (e) {
+        console.error("saveToLocalStorage error:", e);
+      }
+    }
+
+    // ====== CSV 내보내기 ======
+    document.getElementById('export-csv').addEventListener('click', () => {
+      const dateInput = document.getElementById('date-input');
+      const dateStr = dateInput?.value || '';
+      if (!dateStr) {
+        alert('날짜를 먼저 선택해 주세요.');
+        return;
+      }
+      const data = loadFromLocalStorage(dateStr); // { student_id: {name, gender, status}, ... } 권장
+      const ids = Object.keys(data);
+      if (ids.length === 0) {
+        alert('저장된 데이터가 없습니다.');
+        return;
+      }
+
+      // CSV 헤더 구성(필요에 맞게 컬럼 추가/삭제 가능)
+      let csv = 'date,student_id,name,gender,status\n';
+      ids.forEach(id => {
+        const { name = '', gender = '', status = '' } = data[id] || {};
+        csv += `${dateStr},${id},${escapeCSV(name)},${escapeCSV(gender)},${escapeCSV(status)}\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `milk_${dateStr}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    function escapeCSV(val) {
+      const s = String(val ?? '');
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    }
+
+    // ====== CSV 불러오기 ======
+    const importBtn = document.getElementById('import-csv-btn');
+    const importInput = document.getElementById('import-csv-input');
+
+    importBtn.addEventListener('click', () => importInput.click());
+
+    importInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const dateStr = document.getElementById('date-input')?.value || '';
+      if (!dateStr) {
+        alert('CSV를 적용할 날짜를 먼저 선택해 주세요.');
+        importInput.value = '';
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const text = evt.target.result;
+          // 첫 줄이 헤더라고 가정: date,student_id,name,gender,status
+          const lines = text.split(/\r?\n/).filter(Boolean);
+          if (lines.length <= 1) {
+            alert('CSV 내용이 비어 있습니다.');
+            importInput.value = '';
+            return;
+          }
+          const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+          const di = {
+            date: header.indexOf('date'),
+            id: header.indexOf('student_id'),
+            name: header.indexOf('name'),
+            gender: header.indexOf('gender'),
+            status: header.indexOf('status')
+          };
+
+          const nextData = {};
+          for (let i = 1; i < lines.length; i++) {
+            const row = parseCSVLine(lines[i]);
+            if (!row || row.length === 0) continue;
+
+            const rowDate = di.date >= 0 ? row[di.date] : dateStr;
+            if (rowDate && rowDate !== dateStr) {
+              // 다른 날짜의 행은 건너뛰거나, 필요하면 병합 로직을 넣으세요.
+              continue;
+            }
+            const sid = di.id >= 0 ? row[di.id] : '';
+            if (!sid) continue;
+
+            const name = di.name >= 0 ? row[di.name] : '';
+            const gender = di.gender >= 0 ? row[di.gender] : '';
+            const status = di.status >= 0 ? row[di.status] : '';
+            nextData[sid] = { name, gender, status };
+          }
+
+          saveToLocalStorage(dateStr, nextData);
+          alert('CSV 불러오기가 완료되었습니다.');
+          // 화면 리프레시가 필요하면 아래 주석 해제
+          // location.reload();
+        } catch (err) {
+          console.error(err);
+          alert('CSV 파싱 중 오류가 발생했습니다.');
+        } finally {
+          importInput.value = '';
+        }
+      };
+      reader.readAsText(file, 'utf-8');
+    });
+
+    // 간단한 CSV 파서(따옴표 포함 값 지원)
+    function parseCSVLine(line) {
+      const result = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuotes) {
+          if (ch === '"') {
+            if (line[i + 1] === '"') {
+              cur += '"'; i++; // 이스케이프된 따옴표
+            } else {
+              inQuotes = false;
+            }
+          } else {
+            cur += ch;
+          }
+        } else {
+          if (ch === '"') {
+            inQuotes = true;
+          } else if (ch === ',') {
+            result.push(cur);
+            cur = '';
+          } else {
+            cur += ch;
+          }
+        }
+      }
+      result.push(cur);
+      return result.map(s => s.trim());
+    }
+
+    // ====== (선택) 앱과 데이터 연동 가이드 ======
+    // 1) app.js에서 학생 상태가 바뀔 때마다 아래 형태로 저장하세요:
+    //    const dateStr = document.getElementById('date-input').value; // "YYYY-MM-DD"
+    //    const dataObj = { "1": {name:"1번", gender:"M", status:"Y"}, "2": {...} };
+    //    saveToLocalStorage(dateStr, dataObj);
+    //
+    // 2) 초기 렌더 시에도:
+    //    const dataObj = loadFromLocalStorage(dateStr);
+    //    -> 이 값을 사용해 카드 상태를 복원하세요.
+    //
+    // 3) 본 스크립트는 저장/불러오기(내보내기/가져오기)만 담당합니다.
+    </script>
 </body>
 </html>
