@@ -35,11 +35,11 @@ def initialize_students_file():
         
         # Boys: 1-11
         for i in range(1, 12):
-            students_data[str(i)] = f"학생{i}"
+            students_data[str(i)] = str(i)
         
         # Girls: 51-59
         for i in range(51, 60):
-            students_data[str(i)] = f"학생{i}"
+            students_data[str(i)] = str(i)
         
         with open(STUDENTS_FILE, 'w', encoding='utf-8') as f:
             json.dump(students_data, f, ensure_ascii=False, indent=2)
@@ -49,7 +49,7 @@ def initialize_students_file():
 def initialize_csv_file():
     """Create CSV file with header if it doesn't exist"""
     if not os.path.exists(CSV_FILE):
-        with open(CSV_FILE, 'w', newline='', encoding='utf-8') as f:
+        with open(CSV_FILE, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
             writer.writerow(['날짜', '이름', '체크상태'])
         logging.info(f"Created CSV file with header: {CSV_FILE}")
@@ -102,7 +102,7 @@ def save_results():
             return jsonify({"error": "Missing date or results"}), 400
         
         # Append to CSV file
-        with open(CSV_FILE, 'a', newline='', encoding='utf-8') as f:
+        with open(CSV_FILE, 'a', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
             for result in results:
                 check_status = "checked" if result.get('checked', False) else "unchecked"
