@@ -1,248 +1,259 @@
-// Global state
-let students = [];
-let checkStates = {};
-let allChecked = false;
-
-// DOM elements
-const studentsGrid = document.getElementById('students-grid');
-const dateInput = document.getElementById('date-input');
-const genderFilter = document.getElementById('gender-filter');
-const toggleAllBtn = document.getElementById('toggle-all');
-const saveBtn = document.getElementById('save-btn');
-const downloadBtn = document.getElementById('download-btn');
-const statusMessage = document.getElementById('status-message');
-const loading = document.getElementById('loading');
-
-// Initialize app
-document.addEventListener('DOMContentLoaded', async function() {
-    await loadStudents();
-    setupEventListeners();
-    renderStudents();
-});
-
-// Load students data from API
-async function loadStudents() {
-    try {
-        loading.style.display = 'block';
-        const response = await fetch('/api/students');
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        students = await response.json();
-        
-        // Initialize check states (all unchecked)
-        checkStates = {};
-        students.forEach(student => {
-            checkStates[student.number] = false;
-        });
-        
-        console.log('Loaded students:', students);
-        
-    } catch (error) {
-        console.error('Error loading students:', error);
-        showMessage('학생 데이터를 불러오는데 실패했습니다.', 'error');
-    } finally {
-        loading.style.display = 'none';
-    }
+// ====== 유틸: 오늘 날짜 YYYY-MM-DD ======
+function todayStr() {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
 }
 
-// Setup event listeners
-function setupEventListeners() {
-    genderFilter.addEventListener('change', renderStudents);
-    toggleAllBtn.addEventListener('click', toggleAll);
-    saveBtn.addEventListener('click', saveResults);
-    downloadBtn.addEventListener('click', downloadCSV);
+// ====== localStorage 헬퍼 (날짜별 키) ======
+function storageKeyFor(dateStr) {
+  return `milkData:${dateStr}`;
 }
 
-// Render student cards
-function renderStudents() {
-    const filterValue = genderFilter.value;
-    
-    // Filter students based on selected gender
-    const filteredStudents = students.filter(student => {
-        if (filterValue === 'all') return true;
-        return student.gender === filterValue;
-    });
-    
-    studentsGrid.innerHTML = '';
-    
-    filteredStudents.forEach(student => {
-        const card = createStudentCard(student);
-        studentsGrid.appendChild(card);
-    });
-    
-    updateToggleAllButton();
+function loadFromLocalStorage(dateStr) {
+  try {
+    const raw = localStorage.getItem(storageKeyFor(dateStr));
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    console.error("loadFromLocalStorage error:", e);
+    return {};
+  }
 }
 
-// Create individual student card
-function createStudentCard(student) {
-    const card = document.createElement('div');
-    const isChecked = checkStates[student.number];
-    const genderIcon = student.gender === 'M' ? '👦' : '👧';
-    const statusText = isChecked ? '체크' : '미체크';
-    const statusClass = isChecked ? 'checked' : 'unchecked';
-    
-    card.className = `student-card ${statusClass}`;
-    card.dataset.studentNumber = student.number;
-    
-    card.innerHTML = `
-        <div class="card-header">
-            <span class="student-number">${student.number}</span>
-            <span class="gender-icon">${genderIcon}</span>
-        </div>
-        <div class="student-name">${student.name}</div>
-        <div class="status-badge ${statusClass}">${statusText}</div>
-    `;
-    
-    // Add click event listener
-    card.addEventListener('click', function() {
-        toggleStudentState(student.number);
-    });
-    
-    return card;
+function saveToLocalStorage(dateStr, dataObj) {
+  try {
+    localStorage.setItem(storageKeyFor(dateStr), JSON.stringify(dataObj));
+  } catch (e) {
+    console.error("saveToLocalStorage error:", e);
+  }
 }
 
-// Toggle individual student state
-function toggleStudentState(studentNumber) {
-    checkStates[studentNumber] = !checkStates[studentNumber];
-    
-    // Update the card visually
-    const card = document.querySelector(`[data-student-number="${studentNumber}"]`);
-    const isChecked = checkStates[studentNumber];
-    const statusText = isChecked ? '체크' : '미체크';
-    const statusClass = isChecked ? 'checked' : 'unchecked';
-    
-    card.className = `student-card ${statusClass}`;
-    
-    const statusBadge = card.querySelector('.status-badge');
-    statusBadge.className = `status-badge ${statusClass}`;
-    statusBadge.textContent = statusText;
-    
-    updateToggleAllButton();
+// ====== CSV 내보내기/불러오기 ======
+function escapeCSV(val) {
+  const s = String(val ?? "");
+  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
 }
 
-// Toggle all students
-function toggleAll() {
-    const filterValue = genderFilter.value;
-    
-    // Get currently visible students
-    const visibleStudents = students.filter(student => {
-        if (filterValue === 'all') return true;
-        return student.gender === filterValue;
-    });
-    
-    // Check if all visible students are checked
-    const allVisibleChecked = visibleStudents.every(student => checkStates[student.number]);
-    
-    // Toggle all visible students to opposite state
-    visibleStudents.forEach(student => {
-        checkStates[student.number] = !allVisibleChecked;
-    });
-    
-    renderStudents();
+function exportCSVForDate(dateStr) {
+  const data = loadFromLocalStorage(dateStr); // { id: {name, gender, status}, ... }
+  const ids = Object.keys(data);
+  if (!ids.length) {
+    alert("저장된 데이터가 없습니다.");
+    return;
+  }
+  let csv = "date,student_id,name,gender,status\n";
+  ids.forEach((id) => {
+    const { name = "", gender = "", status = "" } = data[id] || {};
+    csv += `${dateStr},${id},${escapeCSV(name)},${escapeCSV(gender)},${escapeCSV(status)}\n`;
+  });
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `milk_${dateStr}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
-// Update toggle all button text
-function updateToggleAllButton() {
-    const filterValue = genderFilter.value;
-    
-    const visibleStudents = students.filter(student => {
-        if (filterValue === 'all') return true;
-        return student.gender === filterValue;
-    });
-    
-    const allVisibleChecked = visibleStudents.every(student => checkStates[student.number]);
-    
-    toggleAllBtn.textContent = allVisibleChecked ? '모두 해제' : '모두 체크';
-}
-
-// Save results to CSV
-async function saveResults() {
-    try {
-        const date = dateInput.value;
-        if (!date) {
-            showMessage('날짜를 선택해주세요.', 'error');
-            return;
-        }
-        
-        // Prepare results for all students
-        const results = students.map(student => ({
-            number: student.number,
-            name: student.name,
-            checked: checkStates[student.number]
-        }));
-        
-        const response = await fetch('/api/save', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                date: date,
-                results: results
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            showMessage(`${result.saved_count}개 레코드가 저장되었습니다.`, 'success');
+function parseCSVLine(line) {
+  const result = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"';
+          i++;
         } else {
-            throw new Error(result.error || 'Unknown error');
+          inQuotes = false;
         }
-        
-    } catch (error) {
-        console.error('Error saving results:', error);
-        showMessage('저장에 실패했습니다: ' + error.message, 'error');
+      } else {
+        cur += ch;
+      }
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ",") {
+        result.push(cur);
+        cur = "";
+      } else cur += ch;
     }
+  }
+  result.push(cur);
+  return result.map((s) => s.trim());
 }
 
-// Download CSV file
-async function downloadCSV() {
-    try {
-        const response = await fetch('/api/download');
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'milk_check.csv';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        
-        showMessage('CSV 파일이 다운로드되었습니다.', 'success');
-        
-    } catch (error) {
-        console.error('Error downloading CSV:', error);
-        showMessage('다운로드에 실패했습니다: ' + error.message, 'error');
+function importCSVToDate(file, dateStr, after) {
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    const text = evt.target.result;
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (lines.length <= 1) {
+      alert("CSV 내용이 비어 있습니다.");
+      after && after(false);
+      return;
     }
+    const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
+    const di = {
+      date: header.indexOf("date"),
+      id: header.indexOf("student_id"),
+      name: header.indexOf("name"),
+      gender: header.indexOf("gender"),
+      status: header.indexOf("status"),
+    };
+    const nextData = {};
+    for (let i = 1; i < lines.length; i++) {
+      const row = parseCSVLine(lines[i]);
+      if (!row || !row.length) continue;
+      const rowDate = di.date >= 0 ? row[di.date] : dateStr;
+      if (rowDate && rowDate !== dateStr) continue; // 다른 날짜는 스킵
+      const sid = di.id >= 0 ? row[di.id] : "";
+      if (!sid) continue;
+      const name = di.name >= 0 ? row[di.name] : "";
+      const gender = di.gender >= 0 ? row[di.gender] : "";
+      const status = di.status >= 0 ? row[di.status] : "";
+      nextData[sid] = { name, gender, status };
+    }
+    saveToLocalStorage(dateStr, nextData);
+    alert("CSV 불러오기 완료!");
+    after && after(true);
+  };
+  reader.readAsText(file, "utf-8");
 }
 
-// Show status message
-function showMessage(message, type = 'info') {
-    statusMessage.textContent = message;
-    statusMessage.className = `status-message ${type}`;
-    statusMessage.style.display = 'block';
-    
-    // Hide message after 3 seconds
-    setTimeout(() => {
-        statusMessage.style.display = 'none';
-    }, 3000);
+// ====== 학생 데이터(예시 20명: 남 1–11, 여 51–59) ======
+const STUDENTS = [
+  // boys 1~11
+  ...Array.from({ length: 11 }, (_, i) => ({
+    id: String(i + 1),
+    name: `${i + 1}번`,
+    gender: "M",
+  })),
+  // girls 51~59
+  ...Array.from({ length: 9 }, (_, i) => ({
+    id: String(51 + i),
+    name: `${51 + i}번`,
+    gender: "F",
+  })),
+];
+
+// ====== 렌더링 ======
+function render(dateStr) {
+  const grid = document.getElementById("students-grid");
+  const genderFilter = document.getElementById("gender-filter").value;
+  const saved = loadFromLocalStorage(dateStr); // {id:{name,gender,status}}
+  grid.innerHTML = "";
+
+  const filtered = STUDENTS.filter(
+    (s) => genderFilter === "all" || s.gender === genderFilter
+  );
+
+  filtered.forEach((s) => {
+    const status = saved[s.id]?.status === "Y";
+    const card = document.createElement("div");
+    card.className = "student-card" + (status ? " checked" : "");
+    card.dataset.id = s.id;
+
+    card.innerHTML = `
+      <div class="avatar">${s.gender === "M" ? "👦" : "👧"}</div>
+      <div class="meta">
+        <div class="name">${s.name}</div>
+        <div class="sid">ID: ${s.id}</div>
+      </div>
+      <div class="badge">${status ? "마심" : "X"}</div>
+    `;
+
+    card.addEventListener("click", () => {
+      const now = loadFromLocalStorage(dateStr);
+      const cur = now[s.id] || { name: s.name, gender: s.gender, status: "N" };
+      cur.status = cur.status === "Y" ? "N" : "Y";
+      now[s.id] = cur;
+      saveToLocalStorage(dateStr, now);
+      render(dateStr);
+      setStatus(`저장됨: ${s.name} → ${cur.status === "Y" ? "마심" : "X"}`);
+    });
+
+    grid.appendChild(card);
+  });
 }
 
-// Utility function to format date
-function formatDate(date) {
-    return date.toISOString().split('T')[0];
+// ====== 상태 메시지 ======
+function setStatus(msg) {
+  const el = document.getElementById("status-message");
+  el.textContent = msg || "";
+  if (!msg) return;
+  setTimeout(() => (el.textContent = ""), 2000);
 }
+
+// ====== 초기화 ======
+document.addEventListener("DOMContentLoaded", () => {
+  const dateInput = document.getElementById("date-input");
+  const genderSel = document.getElementById("gender-filter");
+  const toggleAllBtn = document.getElementById("toggle-all");
+  const exportBtn = document.getElementById("export-csv");
+  const importBtn = document.getElementById("import-csv-btn");
+  const importInput = document.getElementById("import-csv-input");
+
+  // 날짜 기본값(템플릿에 today가 없을 경우 대비)
+  if (!dateInput.value) dateInput.value = todayStr();
+
+  // 초기 렌더
+  render(dateInput.value);
+
+  // 날짜 변경 시 해당 날짜 데이터로 렌더/복원
+  dateInput.addEventListener("change", () => render(dateInput.value));
+
+  // 성별 필터
+  genderSel.addEventListener("change", () => render(dateInput.value));
+
+  // 모두 체크/해제 (토글)
+  toggleAllBtn.addEventListener("click", () => {
+    const dateStr = dateInput.value;
+    const cur = loadFromLocalStorage(dateStr);
+    const showing = Array.from(document.querySelectorAll(".student-card"));
+    // 화면에 보이는 카드가 모두 Y면 모두 N으로, 아니면 모두 Y로
+    const allChecked = showing.every((c) => c.classList.contains("checked"));
+    showing.forEach((card) => {
+      const id = card.dataset.id;
+      const s = STUDENTS.find((x) => x.id === id);
+      if (!s) return;
+      cur[id] = {
+        name: s.name,
+        gender: s.gender,
+        status: allChecked ? "N" : "Y",
+      };
+    });
+    saveToLocalStorage(dateStr, cur);
+    render(dateStr);
+    setStatus(allChecked ? "전체 해제" : "전체 체크");
+  });
+
+  // CSV 내보내기
+  exportBtn.addEventListener("click", () => {
+    const dateStr = dateInput.value;
+    if (!dateStr) return alert("날짜를 먼저 선택해 주세요.");
+    exportCSVForDate(dateStr);
+  });
+
+  // CSV 불러오기
+  importBtn.addEventListener("click", () => importInput.click());
+  importInput.addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const dateStr = dateInput.value;
+    if (!dateStr) {
+      alert("CSV를 적용할 날짜를 먼저 선택해 주세요.");
+      importInput.value = "";
+      return;
+    }
+    importCSVToDate(file, dateStr, (ok) => {
+      importInput.value = "";
+      if (ok) render(dateStr);
+    });
+  });
+});
